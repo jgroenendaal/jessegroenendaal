@@ -29,8 +29,8 @@ const Index = () => {
               <span className="text-primary">$</span> cat /etc/motd
             </p>
             <p className="text-secondary-foreground">
-              Welcome to my homelab. This domain is a gateway to self-hosted
-              services and experiments.
+	      Welcome. No staging environment. We do this live.
+	      This domain contains experiments, side quests and the occasional good decision.
             </p>
             <p className="text-muted-foreground">
               <span className="text-primary">$</span> systemctl status
@@ -59,7 +59,7 @@ const Index = () => {
 
         {/* Footer */}
         <p className="text-center font-mono text-xs text-muted-foreground">
-          Powered by curiosity & open source
+          jessegroenendaal.nl
         </p>
       </div>
     </div>

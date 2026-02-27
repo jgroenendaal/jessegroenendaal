@@ -1,0 +1,8 @@
+jessegroenendaal.nl, www.jessegroenendaal.nl {
+  root * /srv
+  encode zstd gzip
+
+  # SPA routing (React Router refresh fix)
+  try_files {path} /index.html
+  file_server
+}
