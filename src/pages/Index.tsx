@@ -29,7 +29,7 @@ const Index = () => {
               <span className="text-primary">$</span> cat /etc/motd
             </p>
             <p className="text-secondary-foreground">
-	      Welcome. No staging environment. We do this live.
+	      No staging environment. All tested in production ;).
 	      This domain contains experiments, side quests and the occasional good decision.
             </p>
             <p className="text-muted-foreground">
