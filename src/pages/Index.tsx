@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Server, Container, Shield } from "lucide-react";
 
 const NetworkBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -85,9 +86,9 @@ const NetworkBackground = () => {
 
 const Index = () => {
   const services = [
-    { name: "Proxmox", status: "online" },
-    { name: "Docker", status: "online" },
-    { name: "Nginx Proxy", status: "online" },
+    { name: "Proxmox", status: "online", icon: Server },
+    { name: "Docker", status: "online", icon: Container },
+    { name: "OPNsense", status: "online", icon: Shield },
   ];
 
   return (
@@ -132,7 +133,8 @@ const Index = () => {
               key={s.name}
               className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3"
             >
-              <span className="font-mono text-sm text-foreground">
+              <span className="flex items-center gap-2 font-mono text-sm text-foreground">
+                <s.icon className="h-4 w-4 text-muted-foreground" />
                 {s.name}
               </span>
               <span className="flex items-center gap-2 font-mono text-xs text-primary">
