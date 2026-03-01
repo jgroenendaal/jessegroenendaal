@@ -84,7 +84,7 @@ const NetworkBackground = () => {
   );
 };
 
-const CONTAINER_START = new Date("2025-03-01T00:00:00Z");
+const CONTAINER_START = new Date("2026-02-01T14:00:00Z");
 
 const Index = () => {
   const [uptime, setUptime] = useState("");
