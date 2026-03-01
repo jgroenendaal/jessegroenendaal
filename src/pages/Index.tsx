@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Server, Container, Shield, ExternalLink } from "lucide-react";
 
 const NetworkBackground = () => {
@@ -84,7 +84,25 @@ const NetworkBackground = () => {
   );
 };
 
+const CONTAINER_START = new Date("2025-03-01T00:00:00Z");
+
 const Index = () => {
+  const [uptime, setUptime] = useState("");
+
+  useEffect(() => {
+    const tick = () => {
+      const diff = Date.now() - CONTAINER_START.getTime();
+      const days = Math.floor(diff / 86400000);
+      const hrs = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      setUptime(`${days}d ${hrs}h ${mins}m ${secs}s`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const services = [
     { name: "Proxmox", status: "online", icon: Server, url: "#proxmox" },
     { name: "Docker", status: "online", icon: Container, url: "#docker" },
@@ -150,6 +168,9 @@ const Index = () => {
         </div>
 
         {/* Footer */}
+        <p className="text-center font-mono text-xs text-muted-foreground">
+          uptime: {uptime}
+        </p>
         <p className="text-center font-mono text-xs text-muted-foreground">
           jessegroenendaal.nl
         </p>
