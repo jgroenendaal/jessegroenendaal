@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Server, Container, Shield } from "lucide-react";
+import { Server, Container, Shield, ExternalLink } from "lucide-react";
 
 const NetworkBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -86,9 +86,9 @@ const NetworkBackground = () => {
 
 const Index = () => {
   const services = [
-    { name: "Proxmox", status: "online", icon: Server },
-    { name: "Docker", status: "online", icon: Container },
-    { name: "OPNsense", status: "online", icon: Shield },
+    { name: "Proxmox", status: "online", icon: Server, url: "#proxmox" },
+    { name: "Docker", status: "online", icon: Container, url: "#docker" },
+    { name: "OPNsense", status: "online", icon: Shield, url: "#opnsense" },
   ];
 
   return (
@@ -129,19 +129,23 @@ const Index = () => {
         {/* Services */}
         <div className="space-y-2">
           {services.map((s) => (
-            <div
+            <a
               key={s.name}
-              className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3"
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center justify-between rounded-md border border-border bg-card px-4 py-3 transition-all duration-200 hover:border-primary/50 hover:bg-primary/5 hover:shadow-[0_0_12px_-4px_hsl(var(--primary)/0.3)]"
             >
               <span className="flex items-center gap-2 font-mono text-sm text-foreground">
-                <s.icon className="h-4 w-4 text-muted-foreground" />
+                <s.icon className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
                 {s.name}
               </span>
               <span className="flex items-center gap-2 font-mono text-xs text-primary">
                 <span className="h-2 w-2 rounded-full bg-primary" />
                 {s.status}
+                <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
               </span>
-            </div>
+            </a>
           ))}
         </div>
 
