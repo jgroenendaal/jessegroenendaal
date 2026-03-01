@@ -11,8 +11,8 @@ const NetworkBackground = () => {
 
     let animationId: number;
     const nodes: { x: number; y: number; vx: number; vy: number }[] = [];
-    const nodeCount = 40;
-    const maxDist = 150;
+    const nodeCount = 60;
+    const maxDist = 200;
 
     const resize = () => {
       canvas.width = window.innerWidth;
@@ -40,7 +40,7 @@ const NetworkBackground = () => {
           const dy = nodes[i].y - nodes[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < maxDist) {
-            const opacity = (1 - dist / maxDist) * 0.15;
+            const opacity = (1 - dist / maxDist) * 0.35;
             ctx.strokeStyle = `hsla(142, 60%, 55%, ${opacity})`;
             ctx.lineWidth = 0.5;
             ctx.beginPath();
@@ -53,9 +53,9 @@ const NetworkBackground = () => {
 
       // Draw & move nodes
       for (const node of nodes) {
-        ctx.fillStyle = "hsla(142, 60%, 55%, 0.25)";
+        ctx.fillStyle = "hsla(142, 60%, 55%, 0.5)";
         ctx.beginPath();
-        ctx.arc(node.x, node.y, 1.5, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, 2, 0, Math.PI * 2);
         ctx.fill();
 
         node.x += node.vx;
