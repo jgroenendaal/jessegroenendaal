@@ -1610,6 +1610,9 @@ function TerminalCard({ skip, uptime, crt, onToggleCrt }: { skip: boolean; uptim
   const [footer,   setFooter]   = useState(false);
   const [header,   setHeader]   = useState(false);
   const [copied,   setCopied]   = useState(false);
+  const [eggMsg,   setEggMsg]   = useState<string | null>(null);
+  const eggBuf  = useRef("");
+  const eggTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const timers:    ReturnType<typeof setTimeout>[]  = [];
@@ -1659,6 +1662,27 @@ function TerminalCard({ skip, uptime, crt, onToggleCrt }: { skip: boolean; uptim
 
     return () => { timers.forEach(clearTimeout); intervals.forEach(clearInterval); window.removeEventListener("keydown", onKey); };
   }, [skip]);
+
+  useEffect(() => {
+    const EGGS: Record<string, string> = {
+      help: "bash: help: have you tried turning it off and on again?",
+      sudo: "sudo: you are not in the sudoers file. This incident will be reported.",
+      hack: "trace complete. countermeasures deployed. nice try.",
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return;
+      eggBuf.current = (eggBuf.current + e.key.toLowerCase()).slice(-10);
+      const trigger = Object.keys(EGGS).find(w => eggBuf.current.endsWith(w));
+      if (trigger) {
+        eggBuf.current = "";
+        if (eggTimer.current) clearTimeout(eggTimer.current);
+        setEggMsg(EGGS[trigger]);
+        eggTimer.current = setTimeout(() => setEggMsg(null), 4000);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const copyEmail = () => {
     navigator.clipboard.writeText(EMAIL).then(() => {
@@ -1727,7 +1751,12 @@ function TerminalCard({ skip, uptime, crt, onToggleCrt }: { skip: boolean; uptim
           )}
           {done("cmd4", "uptime") && (
             <p className="text-secondary-foreground">
-              {uptime}{cur}
+              {uptime}{!eggMsg && cur}
+            </p>
+          )}
+          {eggMsg && (
+            <p className="animate-fade-in-up text-destructive">
+              <span className="text-destructive">!</span> {eggMsg}{cur}
             </p>
           )}
         </div>
