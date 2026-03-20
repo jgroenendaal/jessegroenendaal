@@ -1095,6 +1095,403 @@ function drawSlabs(ctx: CanvasRenderingContext2D, W: number, H: number, t: numbe
   });
 }
 
+// ─── Mobile (portrait) layout ────────────────────────────────────────────────
+// Packets flow top→bottom; gates are horizontal bands across full width.
+// Triggered when canvas W < H (portrait orientation).
+
+const MOB_HH        = 0.040;              // gate half-height fraction of H
+const MOB_LX_F      = 0.06;              // gate left edge fraction
+const MOB_RX_F      = 0.94;              // gate right edge fraction
+const MOB_START_Y   = 0.055;
+const MOB_DEST_Y    = 0.930;
+const MOB_GATE_Y    = [0.24, 0.50, 0.74] as const;  // 3 gates (INBOUND, WAF, SWG)
+
+const MOB_GATE_INFO = [
+  { label: "INBOUND", nameParts: ["Inbound","Filtering"],  ruleCount: 847,  sig: GATE_SIG[0] },
+  { label: "WAF",     nameParts: ["Web App","Firewall"],   ruleCount: 2841, sig: GATE_SIG[2] },
+  { label: "SWG",     nameParts: ["Secure Web","Gateway"], ruleCount: 634,  sig: GATE_SIG[3] },
+] as const;
+
+const MOB_GATE_COUNT = MOB_GATE_INFO.length;
+
+interface MobPktCfg { xFrac: number; type: "threat"|"clean"; delay: number; blockAt: number; }
+
+const MOB_PACKETS: MobPktCfg[] = [
+  { xFrac: 0.22, type: "threat", delay:  0.00, blockAt:  1 },  // hero threat — WAF
+  { xFrac: 0.58, type: "clean",  delay:  0.00, blockAt: -1 },  // hero clean
+  { xFrac: 0.38, type: "threat", delay:  0.45, blockAt:  0 },  // INBOUND
+  { xFrac: 0.72, type: "clean",  delay: -0.18, blockAt: -1 },
+  { xFrac: 0.84, type: "threat", delay:  0.68, blockAt:  2 },  // SWG
+  { xFrac: 0.12, type: "clean",  delay:  0.32, blockAt: -1 },
+];
+
+const MOB_HERO_IDX = MOB_PACKETS.findIndex(p => p.type === "clean" && p.delay === 0);
+
+const MOB_WP = (() => {
+  function buildMobWP(blockAt: number): [number, number][] {
+    const pts: [number, number][] = [[G_START, MOB_START_Y]];
+    for (let i = 0; i < MOB_GATE_COUNT; i++) {
+      pts.push([G_ARRIVE[i], MOB_GATE_Y[i]]);
+      if (blockAt === i) return pts;
+      pts.push([G_DEPART[i], MOB_GATE_Y[i]]);
+    }
+    pts.push([DEST_T, MOB_DEST_Y]);
+    return pts;
+  }
+  return MOB_PACKETS.map(cfg => buildMobWP(cfg.blockAt));
+})();
+
+function packetMobY(H: number, t: number, cfg: MobPktCfg, idx: number): number {
+  const ta = t - cfg.delay;
+  const pts = MOB_WP[idx];
+  if (ta <= pts[0][0]) return H * pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    const [t0, y0] = pts[i - 1];
+    const [t1, y1] = pts[i];
+    if (ta <= t1) return lerp(H * y0, H * y1, easeInOut(prog(t0, t1, ta)));
+  }
+  return H * pts[pts.length - 1][1];
+}
+
+function mobPktColor(t: number, cfg: MobPktCfg): HSL {
+  if (cfg.type === "threat") {
+    const at      = G_ARRIVE[cfg.blockAt] + cfg.delay;
+    const toAmber = easeOut(prog(at - 0.5, at + 0.1, t));
+    const toRed   = easeOut(prog(at + 0.1, at + 0.5, t));
+    return [lerp(lerp(200,38,toAmber),0,toRed), lerp(lerp(70,88,toAmber),78,toRed), lerp(lerp(65,58,toAmber),58,toRed)];
+  }
+  const lastDep = G_DEPART[MOB_GATE_COUNT - 1] + cfg.delay;
+  const toGreen = easeOut(prog(lastDep - 0.3, lastDep + 0.5, t));
+  return [lerp(200,142,toGreen), lerp(70,58,toGreen), lerp(65,52,toGreen)];
+}
+
+function mobPktAlpha(t: number, cfg: MobPktCfg): number {
+  const showA  = easeOut(prog(Math.max(0, G_START + cfg.delay - 0.05), G_START + cfg.delay + 0.5, t));
+  const blockT = cfg.blockAt >= 0 ? G_ARRIVE[cfg.blockAt] + cfg.delay : Infinity;
+  const fadeOut = cfg.blockAt >= 0 ? 1 - easeOut(prog(blockT + 0.4, blockT + 1.5, t)) : 1;
+  return showA * fadeOut;
+}
+
+// Pre-seeded particle bursts for mobile impacts
+const MOB_BURSTS: Map<number, Particle[]> = new Map();
+MOB_PACKETS.forEach((cfg, idx) => {
+  if (cfg.blockAt < 0) return;
+  const rng = (seed: number) => { let s = seed; return () => { s = (s * 16807) % 2147483647; return (s-1)/2147483646; }; };
+  const rand = rng(idx * 31 + cfg.blockAt * 97 + 13);
+  MOB_BURSTS.set(idx, Array.from({ length: 20 }, () => {
+    const angle = rand() * Math.PI * 2;
+    return { vx: Math.cos(angle), vy: Math.sin(angle), angle, speed: 0.3 + rand() * 0.7, size: 1.2 + rand() * 2.8, spin: (rand()-0.5)*8 };
+  }));
+});
+
+function countMobBlocked(gi: number, t: number) {
+  return MOB_PACKETS.filter(c => c.blockAt === gi && t >= G_ARRIVE[gi] + c.delay + 0.15).length;
+}
+function countMobPassed(gi: number, t: number) {
+  return MOB_PACKETS.filter(c => !(c.blockAt >= 0 && c.blockAt <= gi) && t >= G_DEPART[gi] + c.delay).length;
+}
+
+function drawMobTracks(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const a = easeOut(prog(0.3, 1.1, t)) * 0.14;
+  if (a <= 0) return;
+  ctx.save();
+  ctx.lineWidth = 1; ctx.setLineDash([4, 10]); ctx.lineDashOffset = -(t * 14);
+  MOB_PACKETS.forEach(cfg => {
+    const x      = W * cfg.xFrac;
+    const blockT = cfg.blockAt >= 0 ? G_ARRIVE[cfg.blockAt] + cfg.delay : Infinity;
+    const dimA   = cfg.blockAt >= 0 ? 1 - easeOut(prog(blockT + 0.1, blockT + 1.0, t)) : 1;
+    ctx.strokeStyle = hsl(cfg.type === "threat" ? C.threat : C.gate, a * dimA);
+    ctx.beginPath(); ctx.moveTo(x, H * MOB_START_Y); ctx.lineTo(x, H * MOB_DEST_Y); ctx.stroke();
+  });
+  ctx.setLineDash([]); ctx.restore();
+}
+
+function drawMobNodes(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const lx = W * MOB_LX_F, rx = W * MOB_RX_F, bw = rx - lx, hh = H * MOB_HH;
+
+  // Endpoint bands (INTERNET top, ORIGIN bottom)
+  [{ label:"INTERNET", sub:"External Traffic",  yFrac: MOB_START_Y, ni: 0 },
+   { label:"ORIGIN",   sub:"Protected Origin",  yFrac: MOB_DEST_Y,  ni: 1 }].forEach(({ label, sub, yFrac, ni }) => {
+    const a  = easeOut(prog(0.1 + ni * 0.1, 0.7 + ni * 0.1, t));
+    if (a <= 0) return;
+    const gy = H * yFrac;
+    ctx.save();
+    ctx.globalAlpha = a * 0.07; ctx.fillStyle = hsl(C.gate); ctx.fillRect(lx, gy - hh, bw, hh * 2);
+    const hg = ctx.createLinearGradient(lx, 0, rx, 0);
+    [0, 0.05, 0.95, 1].forEach((s, i) => hg.addColorStop(s, hsl(C.gate, i === 0 || i === 3 ? 0 : a * 0.5)));
+    ctx.globalAlpha = 1; ctx.strokeStyle = hg; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(lx, gy - hh); ctx.lineTo(rx, gy - hh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(lx, gy + hh); ctx.lineTo(rx, gy + hh); ctx.stroke();
+    ctx.globalAlpha = a * 0.85; ctx.fillStyle = hsl(C.gate);
+    ctx.font = `600 9px 'JetBrains Mono', monospace`; ctx.textAlign = "center";
+    ctx.fillText(label, W / 2, gy - 4);
+    ctx.globalAlpha = a * 0.40; ctx.fillStyle = hsl(C.dim);
+    ctx.font = `400 7px 'JetBrains Mono', monospace`;
+    ctx.fillText(sub, W / 2, gy + 8);
+    ctx.restore();
+  });
+
+  // Gate bands
+  MOB_GATE_INFO.forEach((gate, gi) => {
+    const a = easeOut(prog(0.2 + gi * 0.08, 0.8 + gi * 0.08, t));
+    if (a <= 0) return;
+    const gy = H * MOB_GATE_Y[gi];
+
+    let scanA = 0, blockFlashA = 0;
+    MOB_PACKETS.forEach(cfg => {
+      if (cfg.blockAt >= 0 && cfg.blockAt < gi) return;
+      const arr = G_ARRIVE[gi] + cfg.delay, dep = cfg.blockAt === gi ? arr + 0.6 : G_DEPART[gi] + cfg.delay;
+      scanA = Math.max(scanA, easeInOut(prog(arr - 0.1, arr + 0.3, t)) * (1 - easeOut(prog(dep - 0.3, dep, t))));
+      if (cfg.blockAt === gi) blockFlashA = Math.max(blockFlashA, easeOut(prog(arr, arr + 0.06, t)) * (1 - easeOut(prog(arr + 0.06, arr + 0.65, t))));
+    });
+
+    const sc: HSL = blockFlashA > 0.1 ? C.threat : scanA > 0.15 ? C.amber : C.gate;
+    const blocked = countMobBlocked(gi, t), passed = countMobPassed(gi, t);
+    ctx.save();
+
+    // Fill + charge-up
+    ctx.globalAlpha = a * (0.05 + scanA * 0.03 + blockFlashA * 0.04);
+    ctx.fillStyle = hsl(sc); ctx.fillRect(lx, gy - hh, bw, hh * 2);
+    const chargeP = easeInOut(prog(G_ARRIVE[gi] - 0.7, G_ARRIVE[gi] + 0.05, t));
+    const chargeV = chargeP * (1 - easeOut(prog(G_ARRIVE[gi] + 0.05, G_DEPART[gi], t)));
+    if (chargeV > 0.005) {
+      const fillH = hh * 2 * chargeV;
+      const cg = ctx.createLinearGradient(0, gy + hh - fillH, 0, gy + hh);
+      cg.addColorStop(0, hsl(C.amber, 0)); cg.addColorStop(0.5, hsl(C.amber, chargeV * 0.10)); cg.addColorStop(1, hsl(C.amber, chargeV * 0.22));
+      ctx.globalAlpha = 1; ctx.fillStyle = cg; ctx.fillRect(lx + 1, gy + hh - fillH, bw - 2, fillH);
+      ctx.globalAlpha = chargeV * 0.55; ctx.strokeStyle = hsl(C.amber); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lx + 2, gy + hh - fillH); ctx.lineTo(rx - 2, gy + hh - fillH); ctx.stroke();
+    }
+
+    // Borders
+    const hg = ctx.createLinearGradient(lx, 0, rx, 0);
+    [0, 0.05, 0.95, 1].forEach((s, i) => hg.addColorStop(s, hsl(sc, i===0||i===3 ? 0 : a*0.8)));
+    ctx.globalAlpha = 1; ctx.strokeStyle = hg; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(lx, gy - hh); ctx.lineTo(rx, gy - hh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(lx, gy + hh); ctx.lineTo(rx, gy + hh); ctx.stroke();
+    ctx.strokeStyle = hsl(sc, a * 0.45); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(lx+1, gy-hh+2); ctx.lineTo(lx+1, gy+hh-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rx-1, gy-hh+2); ctx.lineTo(rx-1, gy+hh-2); ctx.stroke();
+    // Crossbars
+    ctx.strokeStyle = hsl(sc, a * 0.07); ctx.lineWidth = 0.5;
+    for (let i = 1; i <= 7; i++) { const x = lx + bw*(i/8); ctx.beginPath(); ctx.moveTo(x,gy-hh+2); ctx.lineTo(x,gy+hh-2); ctx.stroke(); }
+
+    // Status dot
+    const dotC: HSL = blockFlashA > 0.05 ? C.threat : scanA > 0.1 ? C.amber : C.clean;
+    ctx.globalAlpha = a * (scanA > 0.1 ? 0.65 + sin01(t, 2.5) * 0.35 : 1);
+    ctx.fillStyle = hsl(dotC); ctx.beginPath(); ctx.arc(rx - 10, gy - hh + 10, 3.5, 0, Math.PI*2); ctx.fill();
+
+    // Label
+    ctx.globalAlpha = a * 0.92; ctx.fillStyle = hsl(sc);
+    ctx.font = `600 9px 'JetBrains Mono', monospace`; ctx.textAlign = "left";
+    ctx.fillText(gate.label, lx + 10, gy - 3);
+    ctx.globalAlpha = a * 0.38; ctx.fillStyle = hsl(C.dim);
+    ctx.font = `400 7px 'JetBrains Mono', monospace`;
+    ctx.fillText(gate.nameParts[0] + " " + gate.nameParts[1], lx + 10, gy + 8);
+    ctx.globalAlpha = a * 0.25; ctx.textAlign = "center";
+    ctx.fillText(`rules: ${gate.ruleCount.toLocaleString()}`, W / 2, gy + 8);
+
+    // Counters
+    ctx.font = `400 7.5px 'JetBrains Mono', monospace`; ctx.textAlign = "right";
+    if (blocked > 0) { ctx.globalAlpha = a * 0.82; ctx.fillStyle = hsl(C.threat); ctx.fillText(`✕ ${blocked}`, rx - 10, gy - 3); }
+    if (passed  > 0) { ctx.globalAlpha = a * 0.82; ctx.fillStyle = hsl(C.clean);  ctx.fillText(`✓ ${passed}`,  rx - 10, gy + 8); }
+
+    // Block flash
+    if (blockFlashA > 0) {
+      ctx.globalAlpha = 1;
+      const fg = ctx.createLinearGradient(0, gy - hh*4, 0, gy + hh*4);
+      fg.addColorStop(0, hsl(C.threat,0)); fg.addColorStop(0.3, hsl(C.threat, blockFlashA*0.45));
+      fg.addColorStop(0.7, hsl(C.threat, blockFlashA*0.45)); fg.addColorStop(1, hsl(C.threat,0));
+      ctx.fillStyle = fg; ctx.fillRect(lx, gy - hh*4, bw, hh*8);
+    }
+    ctx.restore();
+  });
+}
+
+function drawMobHeartbeat(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const fadeIn = easeOut(prog(1.0, 2.8, t));
+  if (fadeIn <= 0) return;
+  const lx = W * MOB_LX_F, rx = W * MOB_RX_F;
+  MOB_GATE_INFO.forEach((_, gi) => {
+    const gy = H * MOB_GATE_Y[gi];
+    if (t >= G_ARRIVE[gi] - 0.3 && t <= G_DEPART[gi] + 0.3) return;
+    const phase = ((t / 2.4 + gi * 0.38) % 1.0);
+    const beatA = phase < 0.08 ? phase / 0.08 : phase < 0.48 ? 1-(phase-0.08)/0.40 : 0;
+    if (beatA <= 0.01) return;
+    const alpha = beatA * 0.45 * fadeIn, ringR = 4 + beatA * 14;
+    [[lx, gy], [rx, gy]].forEach(([px, py]) => {
+      ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = hsl(C.gate); ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(px, py, ringR, 0, Math.PI*2); ctx.stroke(); ctx.restore();
+    });
+  });
+}
+
+function drawMobScanBeams(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const lx = W * MOB_LX_F, bw = W * (MOB_RX_F - MOB_LX_F), hh = H * MOB_HH;
+  MOB_GATE_INFO.forEach((_, gi) => {
+    const gy  = H * MOB_GATE_Y[gi];
+    const arr = G_ARRIVE[gi], dep = G_DEPART[gi];
+    const a   = easeInOut(prog(arr-0.1, arr+0.3, t)) * (1 - easeOut(prog(dep-0.2, dep, t)));
+    if (a <= 0.01) return;
+    const sx = lx + ((prog(arr, dep, t) * 2.2) % 1.0) * bw;
+    ctx.save(); ctx.globalAlpha = a * 0.80;
+    const bg = ctx.createLinearGradient(0, gy - hh*0.85, 0, gy + hh*0.85);
+    bg.addColorStop(0, hsl(C.amber,0)); bg.addColorStop(0.15, hsl(C.amber,0.95)); bg.addColorStop(0.85, hsl(C.amber,0.95)); bg.addColorStop(1, hsl(C.amber,0));
+    ctx.fillStyle = bg; ctx.fillRect(sx - 1, gy - hh*0.85, 2, hh*1.7);
+    const trail = ctx.createLinearGradient(sx-16, 0, sx, 0);
+    trail.addColorStop(0, hsl(C.amber,0)); trail.addColorStop(1, hsl(C.amber,0.09));
+    ctx.fillStyle = trail; ctx.fillRect(sx-16, gy - hh*0.85, 16, hh*1.7);
+    ctx.restore();
+  });
+}
+
+function drawMobBlock(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const lx = W * MOB_LX_F, rx = W * MOB_RX_F, hh = H * MOB_HH;
+  MOB_PACKETS.forEach(cfg => {
+    if (cfg.blockAt < 0) return;
+    const gy = H * MOB_GATE_Y[cfg.blockAt], px = W * cfg.xFrac, at = G_ARRIVE[cfg.blockAt] + cfg.delay;
+    const wallOn = easeOut(prog(at, at+0.07, t)), wallOff = 1 - easeOut(prog(at+0.07, at+0.60, t));
+    const wallA  = wallOn * wallOff;
+    if (wallA > 0.005) {
+      ctx.save();
+      ctx.globalAlpha = wallA * 0.72; ctx.fillStyle = hsl(C.threat); ctx.fillRect(lx+1, gy-hh+1, rx-lx-2, hh*2-2);
+      ctx.globalAlpha = wallA;
+      const eg = ctx.createLinearGradient(0, gy-hh, 0, gy-hh+6);
+      eg.addColorStop(0, hsl(C.threat,1)); eg.addColorStop(1, hsl(C.threat,0));
+      ctx.fillStyle = eg; ctx.fillRect(lx, gy-hh, rx-lx, 6);
+      ctx.restore();
+    }
+    // Shockwave upward
+    const shockFade = easeOut(prog(at, at+0.04, t)) * (1 - easeOut(prog(at+0.04, at+0.5, t)));
+    if (shockFade > 0.005) {
+      const dist = prog(at, at+0.55, t) * H * 0.16;
+      const sg = ctx.createLinearGradient(0, gy-hh-dist, 0, gy-hh);
+      sg.addColorStop(0, hsl(C.threat,0)); sg.addColorStop(0.6, hsl(C.threat,shockFade*0.55)); sg.addColorStop(1, hsl(C.threat,shockFade*0.85));
+      ctx.fillStyle = sg; ctx.fillRect(px - 1.5, gy-hh-dist, 3, dist);
+    }
+    // Lingering barrier
+    const barrierA = easeOut(prog(at+0.07, at+0.25, t)) * (1 - easeOut(prog(at+0.55, at+1.8, t)));
+    if (barrierA > 0) {
+      ctx.save(); ctx.globalAlpha = barrierA*0.55; ctx.strokeStyle = hsl(C.threat); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, gy-hh); ctx.lineTo(px, gy+hh); ctx.stroke(); ctx.restore();
+    }
+    // BLOCKED label
+    const labelA = easeOut(prog(at+0.10, at+0.30, t)) * (1 - easeOut(prog(at+0.9, at+1.8, t)));
+    if (labelA > 0) {
+      ctx.save(); ctx.globalAlpha = labelA; ctx.fillStyle = hsl(C.threat);
+      ctx.font = `700 8px 'JetBrains Mono', monospace`; ctx.textAlign = "left";
+      ctx.fillText("BLOCKED", Math.min(px + 6, W - 60), gy - hh - 4); ctx.restore();
+    }
+  });
+}
+
+function drawMobPackets(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const order = MOB_PACKETS.map((cfg, idx) => ({ cfg, idx })).sort((a, b) => a.cfg.xFrac - b.cfg.xFrac);
+  order.forEach(({ cfg, idx }) => {
+    const pa = mobPktAlpha(t, cfg);
+    if (pa < 0.01) return;
+    const x  = W * cfg.xFrac, py = packetMobY(H, t, cfg, idx);
+    const col = mobPktColor(t, cfg), r = 4.5 * (0.80 + cfg.xFrac * 0.35);
+    for (let i = 8; i >= 1; i--) {
+      const ppy = packetMobY(H, Math.max(0, t - i*0.048), cfg, idx);
+      const da  = pa * (1 - i/8) * 0.40;
+      if (da < 0.01) continue;
+      ctx.save(); ctx.globalAlpha = da; ctx.fillStyle = hsl(col);
+      ctx.beginPath(); ctx.arc(x, ppy, Math.max(1, r-1-i*0.28), 0, Math.PI*2); ctx.fill(); ctx.restore();
+    }
+    glowAt(ctx, x, py, 22 + (r-4.5)*5, col, pa * 0.55);
+    ctx.save(); ctx.globalAlpha = pa; ctx.fillStyle = hsl(col);
+    ctx.beginPath(); ctx.arc(x, py, r, 0, Math.PI*2); ctx.fill();
+    const spd = py - packetMobY(H, Math.max(0, t-0.05), cfg, idx);
+    if (spd > 0.5) {
+      ctx.strokeStyle = hsl(col); ctx.lineWidth = 1; ctx.globalAlpha = pa * 0.55;
+      ctx.beginPath(); ctx.moveTo(x-3, py+r+2); ctx.lineTo(x, py+r+6); ctx.lineTo(x+3, py+r+2); ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
+function drawMobDestination(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const dy = H * MOB_DEST_Y, pulse = sin01(t, 0.55) * 0.22 + 0.78;
+  MOB_PACKETS.forEach(cfg => {
+    if (cfg.blockAt >= 0) return;
+    const dA = easeOut(prog(DEST_T + cfg.delay - 0.3, DEST_T + cfg.delay + 0.5, t));
+    if (dA <= 0) return;
+    glowAt(ctx, W*cfg.xFrac, dy, 26*pulse, C.clean, dA*0.35);
+    ctx.save(); ctx.globalAlpha = dA; ctx.fillStyle = hsl(C.clean);
+    ctx.beginPath(); ctx.arc(W*cfg.xFrac, dy, 4.5, 0, Math.PI*2); ctx.fill(); ctx.restore();
+  });
+  const hero  = MOB_PACKETS[MOB_HERO_IDX];
+  const textA = easeOut(prog(DEST_T + hero.delay + 0.3, DEST_T + hero.delay + 1.1, t));
+  if (textA > 0) {
+    ctx.save(); ctx.globalAlpha = textA; ctx.textAlign = "center";
+    ctx.fillStyle = hsl(C.clean); ctx.font = `500 11px 'JetBrains Mono', monospace`;
+    ctx.fillText("jessegroenendaal.nl", W/2, dy + 22);
+    ctx.fillStyle = hsl(C.clean, 0.65); ctx.font = `400 8px 'JetBrains Mono', monospace`;
+    ctx.fillText("\u2713 TLS 1.3 \u00b7 secure", W/2, dy + 36);
+    ctx.restore();
+  }
+}
+
+function drawMobParticles(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  MOB_PACKETS.forEach((cfg, idx) => {
+    if (cfg.blockAt < 0) return;
+    const particles = MOB_BURSTS.get(idx);
+    if (!particles) return;
+    const at = G_ARRIVE[cfg.blockAt] + cfg.delay, age = t - at;
+    if (age < 0 || age > 1.4) return;
+    const ox = W * cfg.xFrac, oy = H * MOB_GATE_Y[cfg.blockAt];
+    particles.forEach(p => {
+      const life = easeOut(prog(at+0.02, at+1.4, t)), fade = 1 - life;
+      if (fade <= 0) return;
+      const dist = age * p.speed * W * 0.10, sr = Math.max(0.3, p.size*(1-life*0.7));
+      ctx.save(); ctx.globalAlpha = fade*0.85; ctx.translate(ox + p.vx*dist, oy + p.vy*dist); ctx.rotate(p.spin*age);
+      ctx.beginPath();
+      if (p.size > 2.5) { ctx.moveTo(0,-sr); ctx.lineTo(sr*0.6,0); ctx.lineTo(0,sr); ctx.lineTo(-sr*0.6,0); ctx.closePath(); }
+      else ctx.arc(0, 0, sr, 0, Math.PI*2);
+      ctx.fillStyle = hsl(C.threat, 0.9 - life*0.5); ctx.fill(); ctx.restore();
+    });
+  });
+}
+
+function drawMobSignatures(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  const hh = H * MOB_HH;
+  MOB_PACKETS.forEach(cfg => {
+    if (cfg.blockAt < 0) return;
+    const at  = G_ARRIVE[cfg.blockAt] + cfg.delay, sig = MOB_GATE_INFO[cfg.blockAt].sig;
+    const a   = easeOut(prog(at+0.08, at+0.30, t)) * (1 - easeOut(prog(at+0.80, at+1.60, t)));
+    if (a <= 0.01) return;
+    const px = W * cfg.xFrac, gy = H * MOB_GATE_Y[cfg.blockAt];
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.font = `400 7px 'JetBrains Mono', monospace`;
+    const tw = ctx.measureText(sig).width, pad = 5;
+    const bx = clamp(px - tw/2 - pad, 4, W - tw - pad*2 - 4), by = gy - hh - 22;
+    rrect(ctx, bx, by, tw + pad*2, 14, 3);
+    ctx.fillStyle = hsl(C.bg, 0.88); ctx.fill();
+    ctx.strokeStyle = hsl(C.threat, 0.55); ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = hsl(C.threat); ctx.textAlign = "center";
+    ctx.fillText(`\u2691 ${sig}`, bx + tw/2 + pad, by + 11);
+    ctx.restore();
+  });
+}
+
+function drawMobCleanStamps(ctx: CanvasRenderingContext2D, W: number, H: number, t: number) {
+  MOB_GATE_INFO.forEach((_, gi) => {
+    const gy = H * MOB_GATE_Y[gi];
+    MOB_PACKETS.forEach(cfg => {
+      if (cfg.type !== "clean" || (cfg.blockAt >= 0 && cfg.blockAt <= gi)) return;
+      const depT = G_DEPART[gi] + cfg.delay;
+      const a    = easeOut(prog(depT-0.05, depT+0.15, t)) * (1 - easeOut(prog(depT+0.15, depT+0.65, t)));
+      if (a <= 0.01) return;
+      ctx.save(); ctx.globalAlpha = a * 0.90; ctx.strokeStyle = hsl(C.clean); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(W*cfg.xFrac, gy, 9*a, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = a * 0.85; ctx.fillStyle = hsl(C.clean);
+      ctx.font = `600 8px 'JetBrains Mono', monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("\u2713", W*cfg.xFrac, gy); ctx.textBaseline = "alphabetic"; ctx.restore();
+    });
+  });
+}
+
 // ─── Portfolio layer ─────────────────────────────────────────────────────────
 
 const CONTAINER_START = new Date("2026-02-01T14:00:00Z");
@@ -1105,15 +1502,30 @@ const SERVICES = [
   { name: "OPNsense", Icon: Shield,    url: "#opnsense" },
 ] as const;
 
+const MOTD_POOL: [string, string][] = [
+  ["No staging environment. All tested in production ;).",       "This domain runs on experiments, side quests, and stubbornness."],
+  ["Uptime is just a suggestion.",                               "A very strongly worded one."],
+  ["It works on my machine.",                                    "Containerized the machine. Problem solved."],
+  ["chmod 777 seemed fine at the time.",                         "We don't talk about that weekend."],
+  ["The firewall rules made sense at 2am.",                      "Some of them still do."],
+  ["Documentation: somewhere, probably.",                        "The code is self-documenting. Trust me."],
+  ["99% of bugs fixed by turning it off and on again.",          "The other 1% got promoted to features."],
+  ["Survived: power cuts, bad updates, and one cat.",            "Resilience through selective ignorance."],
+  ["kubectl delete pod --all fixed it.",                         "Still unsure what was wrong. Won't investigate."],
+  ["Technically not a memory leak.",                             "It's a long-running in-memory collection."],
+];
+
+const [MOTD1, MOTD2] = MOTD_POOL[Math.floor(Math.random() * MOTD_POOL.length)];
+
 // Each item: text typed into the terminal (cmd items omit the "$ " prefix)
 const TYPING_ITEMS = [
-  { id: "cmd1",  text: "whoami",                                              type: "cmd"  as const, startMs: 400,  charMs: 32 },
-  { id: "h1",    text: "jessegroenendaal.nl",                                 type: "h1"   as const, startMs: 860,  charMs: 28 },
-  { id: "cmd2",  text: "cat /etc/motd",                                       type: "cmd"  as const, startMs: 1680, charMs: 30 },
-  { id: "motd1", text: "No staging environment. All tested in production ;).", type: "text" as const, startMs: 2380, charMs: 12 },
-  { id: "motd2", text: "This domain contains experiments, side quests and the occasional good decision.", type: "text" as const, startMs: 3140, charMs: 12 },
-  { id: "cmd3",  text: "systemctl status",                                    type: "cmd"  as const, startMs: 4420, charMs: 30 },
-] as const;
+  { id: "cmd1",  text: "whoami",        type: "cmd"  as const, startMs: 400,  charMs: 32 },
+  { id: "h1",    text: "jessegroenendaal.nl", type: "h1" as const, startMs: 860, charMs: 28 },
+  { id: "cmd2",  text: "cat /etc/motd", type: "cmd"  as const, startMs: 1680, charMs: 30 },
+  { id: "motd1", text: MOTD1,           type: "text" as const, startMs: 2380, charMs: 12 },
+  { id: "motd2", text: MOTD2,           type: "text" as const, startMs: 2380 + MOTD1.length * 12 + 200, charMs: 12 },
+  { id: "cmd3",  text: "systemctl status", type: "cmd" as const, startMs: 2380 + MOTD1.length * 12 + MOTD2.length * 12 + 600, charMs: 30 },
+];
 
 function NetworkBg() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -1236,14 +1648,14 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
           )}
           {show("motd1") && (
             <p className="text-secondary-foreground">
-              {typed("motd1", "No staging environment. All tested in production ;).")}
-              {!show("motd2") && !done("motd1", "No staging environment. All tested in production ;).") && cur}
+              {typed("motd1", MOTD1)}
+              {!show("motd2") && !done("motd1", MOTD1) && cur}
             </p>
           )}
           {show("motd2") && (
             <p className="text-secondary-foreground">
-              {typed("motd2", "This domain contains experiments, side quests and the occasional good decision.")}
-              {!done("motd2", "This domain contains experiments, side quests and the occasional good decision.") && cur}
+              {typed("motd2", MOTD2)}
+              {!done("motd2", MOTD2) && cur}
             </p>
           )}
           {show("cmd3") && (
@@ -1381,41 +1793,65 @@ export default function WAFDemo() {
       ctx.fillStyle = hsl(C.bg);
       ctx.fillRect(0, 0, W, H);
 
-      // ── Camera: follow hero packet ──────────────────────────────────────────
-      const heroPx = packetX(W, t, PACKETS[HERO_IDX], HERO_IDX);
-      if (camXRef.current < 0) camXRef.current = heroPx;
-      camXRef.current = lerp(camXRef.current, heroPx, 0.032);
-      const camPan = (camXRef.current - W * 0.5) * -0.10;
+      const isMob = W < H;  // portrait → mobile layout
 
-      // ── Block jolt ──────────────────────────────────────────────────────────
-      let maxJolt = 0;
-      PACKETS.forEach(cfg => {
-        if (cfg.blockAt < 0) return;
-        const at = G_ARRIVE[cfg.blockAt] + cfg.delay;
-        const j = easeOut(prog(at, at + 0.04, t)) * (1 - easeOut(prog(at + 0.04, at + 0.28, t)));
-        maxJolt = Math.max(maxJolt, j);
-      });
-      const joltX = maxJolt * Math.sin(t * 82) * 6;
-      const joltY = maxJolt * -4;
+      if (isMob) {
+        // ── Mobile: packets flow top→bottom, gates are horizontal bands ────────
+        let mobJolt = 0;
+        MOB_PACKETS.forEach(cfg => {
+          if (cfg.blockAt < 0) return;
+          const at = G_ARRIVE[cfg.blockAt] + cfg.delay;
+          const j  = easeOut(prog(at, at+0.04, t)) * (1 - easeOut(prog(at+0.04, at+0.28, t)));
+          mobJolt = Math.max(mobJolt, j);
+        });
+        const mjX = mobJolt * Math.sin(t * 82) * 4, mjY = mobJolt * -3;
+        ctx.save();
+        ctx.translate(mjX, mjY);
+        drawGrid(ctx, W, H, t);
+        drawMobTracks(ctx, W, H, t);
+        drawMobNodes(ctx, W, H, t);
+        drawMobHeartbeat(ctx, W, H, t);
+        drawMobScanBeams(ctx, W, H, t);
+        drawMobCleanStamps(ctx, W, H, t);
+        drawMobBlock(ctx, W, H, t);
+        drawMobParticles(ctx, W, H, t);
+        drawMobSignatures(ctx, W, H, t);
+        drawMobPackets(ctx, W, H, t);
+        drawMobDestination(ctx, W, H, t);
+        ctx.restore();
+      } else {
+        // ── Desktop: packets flow left→right, gates are vertical slabs ─────────
+        const heroPx = packetX(W, t, PACKETS[HERO_IDX], HERO_IDX);
+        if (camXRef.current < 0) camXRef.current = heroPx;
+        camXRef.current = lerp(camXRef.current, heroPx, 0.032);
+        const camPan = (camXRef.current - W * 0.5) * -0.10;
 
-      ctx.save();
-      ctx.translate(camPan + joltX, joltY);
+        let maxJolt = 0;
+        PACKETS.forEach(cfg => {
+          if (cfg.blockAt < 0) return;
+          const at = G_ARRIVE[cfg.blockAt] + cfg.delay;
+          const j  = easeOut(prog(at, at+0.04, t)) * (1 - easeOut(prog(at+0.04, at+0.28, t)));
+          maxJolt = Math.max(maxJolt, j);
+        });
+        const joltX = maxJolt * Math.sin(t * 82) * 6, joltY = maxJolt * -4;
 
-      drawGrid(ctx, W, H, t);
-      drawTracks(ctx, W, H, t);
-      drawBackbone(ctx, W, H, t);
-      drawSlabs(ctx, W, H, t);
-      drawHeartbeat(ctx, W, H, t);
-      drawNodes(ctx, W, H, t);
-      drawScanBeams(ctx, W, H, t);
-      drawCleanStamps(ctx, W, H, t);
-      drawBlock(ctx, W, H, t);
-      drawParticles(ctx, W, H, t);
-      drawSignatures(ctx, W, H, t);
-      drawPackets(ctx, W, H, t);
-      drawDestination(ctx, W, H, t);
-
-      ctx.restore();
+        ctx.save();
+        ctx.translate(camPan + joltX, joltY);
+        drawGrid(ctx, W, H, t);
+        drawTracks(ctx, W, H, t);
+        drawBackbone(ctx, W, H, t);
+        drawSlabs(ctx, W, H, t);
+        drawHeartbeat(ctx, W, H, t);
+        drawNodes(ctx, W, H, t);
+        drawScanBeams(ctx, W, H, t);
+        drawCleanStamps(ctx, W, H, t);
+        drawBlock(ctx, W, H, t);
+        drawParticles(ctx, W, H, t);
+        drawSignatures(ctx, W, H, t);
+        drawPackets(ctx, W, H, t);
+        drawDestination(ctx, W, H, t);
+        ctx.restore();
+      }
 
       const s = getStage(t);
       if (s.at !== prevStageAt.current) {
