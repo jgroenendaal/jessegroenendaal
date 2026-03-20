@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Server, Container, Shield, ExternalLink } from "lucide-react";
+import { Server, Container, Shield, ExternalLink, Github, Linkedin, Instagram, Mail, Check, Copy, Monitor } from "lucide-react";
 
 // ─── Math utilities ──────────────────────────────────────────────────────────
 
@@ -1502,6 +1502,14 @@ const SERVICES = [
   { name: "OPNsense", Icon: Shield,    url: "#opnsense" },
 ] as const;
 
+const SOCIAL = [
+  { name: "GitHub",    Icon: Github,    url: "https://github.com/jgroenendaal",                         key: "G" },
+  { name: "LinkedIn",  Icon: Linkedin,  url: "https://nl.linkedin.com/in/jesse-groenendaal-33b894152", key: "L" },
+  { name: "Instagram", Icon: Instagram, url: "https://instagram.com/jessegroenendaal",                  key: "I" },
+] as const;
+
+const EMAIL = "jesse@jessegroenendaal.nl";
+
 const MOTD_POOL: [string, string][] = [
   ["No staging environment. All tested in production ;).",       "This domain runs on experiments, side quests, and stubbornness."],
   ["Uptime is just a suggestion.",                               "A very strongly worded one."],
@@ -1538,13 +1546,17 @@ const MOTD_POOL: [string, string][] = [
 const [MOTD1, MOTD2] = MOTD_POOL[Math.floor(Math.random() * MOTD_POOL.length)];
 
 // Each item: text typed into the terminal (cmd items omit the "$ " prefix)
+const CMD4_START  = 2380 + MOTD1.length * 12 + MOTD2.length * 12 + 600;
+const CMD4_END    = CMD4_START + "uptime".length * 30;
+const CARDS_START = CMD4_END + 600;
+
 const TYPING_ITEMS = [
-  { id: "cmd1",  text: "whoami",        type: "cmd"  as const, startMs: 400,  charMs: 32 },
-  { id: "h1",    text: "jessegroenendaal.nl", type: "h1" as const, startMs: 860, charMs: 28 },
-  { id: "cmd2",  text: "cat /etc/motd", type: "cmd"  as const, startMs: 1680, charMs: 30 },
-  { id: "motd1", text: MOTD1,           type: "text" as const, startMs: 2380, charMs: 12 },
-  { id: "motd2", text: MOTD2,           type: "text" as const, startMs: 2380 + MOTD1.length * 12 + 200, charMs: 12 },
-  { id: "cmd3",  text: "systemctl status", type: "cmd" as const, startMs: 2380 + MOTD1.length * 12 + MOTD2.length * 12 + 600, charMs: 30 },
+  { id: "cmd1",  text: "whoami",            type: "cmd"  as const, startMs: 400,        charMs: 32 },
+  { id: "h1",    text: "jessegroenendaal.nl", type: "h1" as const, startMs: 860,        charMs: 28 },
+  { id: "cmd2",  text: "cat /etc/motd",     type: "cmd"  as const, startMs: 1680,       charMs: 30 },
+  { id: "motd1", text: MOTD1,               type: "text" as const, startMs: 2380,       charMs: 12 },
+  { id: "motd2", text: MOTD2,               type: "text" as const, startMs: 2380 + MOTD1.length * 12 + 200, charMs: 12 },
+  { id: "cmd4",  text: "uptime",            type: "cmd"  as const, startMs: CMD4_START, charMs: 30 },
 ];
 
 function NetworkBg() {
@@ -1590,11 +1602,14 @@ function NetworkBg() {
   return <canvas ref={ref} className="pointer-events-none fixed inset-0 z-0" aria-hidden="true" />;
 }
 
-function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
+function TerminalCard({ skip, uptime, crt, onToggleCrt }: { skip: boolean; uptime: string; crt: boolean; onToggleCrt: () => void }) {
   const [chars,    setChars]    = useState<Record<string, number>>({});
   const [services, setServices] = useState(0);
+  const [social,   setSocial]   = useState(0);
+  const [email,    setEmail]    = useState(false);
   const [footer,   setFooter]   = useState(false);
   const [header,   setHeader]   = useState(false);
+  const [copied,   setCopied]   = useState(false);
 
   useEffect(() => {
     const timers:    ReturnType<typeof setTimeout>[]  = [];
@@ -1606,6 +1621,8 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
       TYPING_ITEMS.forEach(({ id, text }) => { all[id] = text.length; });
       setChars(all);
       setServices(SERVICES.length);
+      setSocial(SOCIAL.length);
+      setEmail(true);
       setFooter(true);
       return;
     }
@@ -1624,13 +1641,31 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
       }, startMs));
     });
 
-    SERVICES.forEach((_, idx) => {
-      timers.push(setTimeout(() => setServices(idx + 1), 5100 + idx * 200));
+    SOCIAL.forEach((_, idx) => {
+      timers.push(setTimeout(() => setSocial(idx + 1), CARDS_START + idx * 150));
     });
-    timers.push(setTimeout(() => setFooter(true), 5750));
+    timers.push(setTimeout(() => setEmail(true), CARDS_START + SOCIAL.length * 150));
+    SERVICES.forEach((_, idx) => {
+      timers.push(setTimeout(() => setServices(idx + 1), CARDS_START + SOCIAL.length * 150 + 150 + idx * 200));
+    });
+    timers.push(setTimeout(() => setFooter(true), CARDS_START + SOCIAL.length * 150 + 150 + SERVICES.length * 200 + 350));
 
-    return () => { timers.forEach(clearTimeout); intervals.forEach(clearInterval); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const match = SOCIAL.find(s => s.key === e.key.toUpperCase());
+      if (match) { e.preventDefault(); window.open(match.url, "_blank", "noopener"); }
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => { timers.forEach(clearTimeout); intervals.forEach(clearInterval); window.removeEventListener("keydown", onKey); };
   }, [skip]);
+
+  const copyEmail = () => {
+    navigator.clipboard.writeText(EMAIL).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const typed = (id: string, text: string) => text.slice(0, chars[id] ?? 0);
   const show  = (id: string) => (chars[id] ?? 0) > 0;
@@ -1646,6 +1681,12 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
           <span className="h-3 w-3 rounded-full" style={{ background: "hsl(45,90%,55%)" }} />
           <span className="h-3 w-3 rounded-full bg-primary" />
           <span className="ml-2 font-mono text-xs text-muted-foreground">jesse@homelab:~</span>
+          <button onClick={onToggleCrt} title="Toggle CRT mode"
+            className={`ml-auto flex items-center gap-1 font-mono text-xs transition-colors ${crt ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Monitor className="h-3 w-3" />
+            <span>[CRT]</span>
+          </button>
         </div>
         <div className="space-y-3 p-6 font-mono text-sm">
           {show("cmd1") && (
@@ -1678,15 +1719,56 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
               {!done("motd2", MOTD2) && cur}
             </p>
           )}
-          {show("cmd3") && (
+          {show("cmd4") && (
             <p className="text-muted-foreground">
-              <span className="text-primary">$</span> {typed("cmd3", "systemctl status")}
-              {/* cursor persists here — this is the active prompt */}
-              {cur}
+              <span className="text-primary">$</span> {typed("cmd4", "uptime")}
+              {!done("cmd4", "uptime") && cur}
+            </p>
+          )}
+          {done("cmd4", "uptime") && (
+            <p className="text-secondary-foreground">
+              {uptime}{cur}
             </p>
           )}
         </div>
       </div>
+
+      {/* Social links */}
+      {social > 0 && (
+        <div className="space-y-2">
+          <p className="font-mono text-xs text-muted-foreground px-1"># contacts</p>
+          {SOCIAL.slice(0, social).map((s) => (
+            <a key={s.name} href={s.url} target="_blank" rel="noopener noreferrer"
+              className="group flex items-center justify-between rounded-md border border-border bg-card px-4 py-3 transition-all duration-200 hover:border-primary/50 hover:bg-primary/5 hover:shadow-[0_0_12px_-4px_hsl(var(--primary)/0.3)] animate-fade-in-up"
+            >
+              <span className="flex items-center gap-2 font-mono text-sm text-foreground">
+                <s.Icon className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
+                {s.name}
+              </span>
+              <span className="flex items-center gap-2">
+                <kbd className="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground group-hover:inline">[{s.key}]</kbd>
+                <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+              </span>
+            </a>
+          ))}
+          {email && (
+            <button onClick={copyEmail}
+              className="group flex w-full items-center justify-between rounded-md border border-border bg-card px-4 py-3 transition-all duration-200 hover:border-primary/50 hover:bg-primary/5 hover:shadow-[0_0_12px_-4px_hsl(var(--primary)/0.3)] animate-fade-in-up"
+            >
+              <span className="flex items-center gap-2 font-mono text-sm text-foreground">
+                <Mail className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
+                {EMAIL}
+              </span>
+              <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+                {copied
+                  ? <><Check className="h-3 w-3 text-primary" /><span className="text-primary">copied</span></>
+                  : <Copy className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                }
+              </span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Services */}
       <div className="space-y-2">
@@ -1721,6 +1803,13 @@ function TerminalCard({ skip, uptime }: { skip: boolean; uptime: string }) {
 function PortfolioLayer({ skip }: { skip: boolean }) {
   const [uptime,  setUptime]  = useState("");
   const [visible, setVisible] = useState(false);
+  const [crt,     setCrt]     = useState(() => localStorage.getItem("crt") === "1");
+
+  const toggleCrt = () => setCrt(v => {
+    const next = !v;
+    localStorage.setItem("crt", next ? "1" : "0");
+    return next;
+  });
 
   useEffect(() => {
     const tick = () => {
@@ -1743,10 +1832,11 @@ function PortfolioLayer({ skip }: { skip: boolean }) {
   }, [skip]);
 
   return (
-    <div className={`absolute inset-0 transition-opacity duration-[900ms] ease-out ${visible ? "opacity-100" : "opacity-0"}`}>
+    <div className={`absolute inset-0 overflow-y-auto transition-opacity duration-[900ms] ease-out ${visible ? "opacity-100" : "opacity-0"}`}>
       <NetworkBg />
-      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center p-6">
-        <TerminalCard skip={skip} uptime={uptime} />
+      {crt && <div className="crt-overlay pointer-events-none fixed inset-0 z-30" />}
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center p-6 py-12">
+        <TerminalCard skip={skip} uptime={uptime} crt={crt} onToggleCrt={toggleCrt} />
       </div>
     </div>
   );
